@@ -81,7 +81,7 @@ class Helper:
       self.logging.debug(f'Searching for: {selector}; Not found')
 
   @log_execution_time
-  def find_any_element_with_wait(self, *selectors, parent=None) -> tuple[WebElement, int]:
+  def find_any_element_with_wait(self, *selectors: str, parent=None) -> tuple[WebElement, int]:
     """
     Searches for any of the provided selectors and returns the first WebElement found along with its index in the argument list.
     
@@ -90,7 +90,7 @@ class Helper:
         parent: Optional parent element to search within
     
     Returns:
-        Tuple of (WebElement, index) if found, or (None, -1) if no element is found
+        Tuple of (WebElement, index) if found, or (None, -1) if no element is found. Index is the index of the selector that was found in the argument list.
     """
     if parent is None:
       parent = self.driver
@@ -121,10 +121,10 @@ class Helper:
     try:
       self.logging.debug(f'Clicking: {element}')
       self.driver.execute_script("""
-          arguments[0].scrollIntoView(); 
-          arguments[0].click();
-          arguments[0].dispatchEvent(new Event('change', { bubbles: true }));
-          arguments[0].dispatchEvent(new Event('input', { bubbles: true }));
+        arguments[0].scrollIntoView(); 
+        arguments[0].click();
+        arguments[0].dispatchEvent(new Event('change', { bubbles: true }));
+        arguments[0].dispatchEvent(new Event('input', { bubbles: true }));
       """, element)
       self.logging.debug(f'Clicked')
     except:
