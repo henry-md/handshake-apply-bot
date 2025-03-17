@@ -10,9 +10,16 @@ import logging
 import time
 import traceback
 from pynput import keyboard
+import json
+from datetime import datetime
 
 # Custom imports
 from utils.selenium_helper import Helper
+
+# Global variables
+submissions_count = 0
+stop_loop = False
+did_log_submissions = False
 
 def open_and_login(url, driver, s, EMAIL, PASSWORD):
     # Open page
@@ -43,10 +50,43 @@ def on_press(key):
     except AttributeError:
         pass
 
+def update_job_tracking(submissions_count):
+    global did_log_submissions
+    if did_log_submissions or not submissions_count:
+        return
+    
+    tracking_file = "utils/job_tracking.json"
+    
+    try:
+        # Read existing data
+        with open(tracking_file, 'r') as f:
+            data = json.load(f)
+    except (FileNotFoundError, json.JSONDecodeError):
+        # Initialize if file doesn't exist or is invalid
+        data = {"total_submissions": 0, "sessions": []}
+    
+    # Update total submissions
+    data["total_submissions"] += submissions_count
+    
+    # Add new session
+    current_time = datetime.now().strftime("%m/%d/%y %I:%M%p").lower()
+    new_session = {
+        "date": current_time,
+        "session_submissions": submissions_count
+    }
+    data["sessions"].append(new_session)
+    
+    # Write updated data
+    with open(tracking_file, 'w') as f:
+        json.dump(data, f, indent=4)
+
+    # Mark that we've logged submissions
+    did_log_submissions = True
+
 def main():
-    # Track 
-    global stop_loop
-    stop_loop = False
+    # Track submissions for this session, and whether we should stop 
+    # the loop because of a keyboard interrupt
+    global submissions_count, stop_loop
     
     # Setup keyboard listener
     listener = keyboard.Listener(on_press=on_press)
@@ -137,12 +177,18 @@ def main():
             s.actions.move_to_element_with_offset(element, 0, 35).click().perform()
         
         # Click submit
-        s.click_with_mouse('[data-hook="submit-application"]', parent=apply_modal)
+        if s.element_exists('[data-hook="submit-application"]', parent=apply_modal):
+            s.click_with_mouse('[data-hook="submit-application"]', parent=apply_modal)
+            submissions_count += 1
+        else:
+            print('🔄 No submit button found')
+            continue
 
     # Style points
     click_out_of_modal(s)
 
     listener.stop()
+    update_job_tracking(submissions_count)
     return driver
 
 if __name__ == "__main__":
@@ -151,6 +197,7 @@ if __name__ == "__main__":
         print('PROGRAM DIED: OUTSIDE MAIN FUNCTION')
         time.sleep(60*60)
     except Exception as e:
+        update_job_tracking(submissions_count)
         print('Error occurred in main:')
         print(traceback.format_exc())
         time.sleep(60*60)
