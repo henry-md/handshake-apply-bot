@@ -9,7 +9,6 @@ import os
 import logging
 import time
 import traceback
-from pynput import keyboard
 import json
 from datetime import datetime
 
@@ -20,8 +19,8 @@ from utils.query_keywords import query_keywords
 # Global variables
 submissions_count = 0
 job_list_len = 0
+tab_count = 1
 job_list_visited = 0
-stop_loop = False
 did_log_submissions = False
 session_start_time = None
 
@@ -45,18 +44,9 @@ def click_out_of_modal(s):
     if s.element_exists('[data-hook="apply-modal-content"]'):
         s.click_with_mouse('button[aria-label="dismiss"]')
 
-def on_press(key):
-    global stop_loop
-    try:
-        if key == keyboard.Key.enter:
-            print("Enter pressed - stopping after current job")
-            stop_loop = True
-    except AttributeError:
-        pass
-
 def update_job_tracking(submissions_count):
-    global did_log_submissions, session_start_time
-    if did_log_submissions or not submissions_count:
+    global did_log_submissions, session_start_time, tab_count
+    if did_log_submissions:
         return
     
     # Calculate session duration in minutes
@@ -77,10 +67,11 @@ def update_job_tracking(submissions_count):
     
     # Add new session
     current_time = datetime.now().strftime("%m/%d/%y %I:%M%p").lower()
+    print('logging job list len', job_list_len, 'tab count', tab_count, 'job list visited', job_list_visited)
     new_session = {
         "date": current_time,
         "session_submissions": submissions_count,
-        "job_list_len": job_list_len,
+        "job_list_len": job_list_len * tab_count,
         "job_list_visited": job_list_visited,
         "session_duration_minutes": session_duration
     }
@@ -93,18 +84,15 @@ def update_job_tracking(submissions_count):
     # Mark that we've logged submissions
     did_log_submissions = True
 
-def apply_to_jobs_in_left_panel(s, listener):
+def apply_to_jobs_in_left_panel(s):
+    global submissions_count, job_list_len, job_list_visited, session_start_time
 
     # Apply to all jobs in left panel
-    job_preview_panel = s.find_element_with_wait("[aria-label='Job Preview']")
     job_list = s.find_all_elements_with_wait("[data-hook='jobs-card']")
     assert job_list, '🔄 No jobs found'
     job_list_len = len(job_list)
     for i in range(len(job_list)):
-        if stop_loop:
-            print("🛑 Stopping job applications as requested")
-            break
-        job_list_visited = i + 1
+        job_list_visited += 1
             
         click_out_of_modal(s)
 
@@ -112,8 +100,6 @@ def apply_to_jobs_in_left_panel(s, listener):
         if not job_list[i] or not s.web_element_exists(job_list[i]):
             old_len = len(job_list)
             job_list = s.find_all_elements_with_wait("[data-hook='jobs-card']")
-            print('old job list len', old_len)
-            print('new job list', job_list)
             assert job_list and len(job_list) == old_len, '🔄 Failed to revive job_list'
         
         # Scroll and click on job in left panel
@@ -121,7 +107,7 @@ def apply_to_jobs_in_left_panel(s, listener):
             s.scroll_into_view(job_list[i])
             s.click_web_element(job_list[i])
         except:
-            print('🔄 Failed to scroll and click on job in left panel')
+            logging.error('🔄 Failed to scroll and click on job in left panel')
             continue
         
         # Skip external applications
@@ -134,10 +120,10 @@ def apply_to_jobs_in_left_panel(s, listener):
             title_element = job_list[i].find_element("css selector", "h3")
             title_text = title_element.text
             if not any(keyword.lower() in title_text.lower() for keyword in query_keywords):
-                print(f"Skipping job with title: {title_text} - doesn't match keywords")
+                logging.info(f"Skipping job with title: {title_text} - doesn't match keywords")
                 continue
         except Exception as e:
-            print(f"Failed to check job title: {str(e)}")
+            logging.error(f"Failed to check job title: {str(e)}")
             continue
 
         # Apply to the specific job in right panel
@@ -154,29 +140,20 @@ def apply_to_jobs_in_left_panel(s, listener):
         if s.element_exists('[data-hook="submit-application"]', parent=apply_modal):
             s.click_with_mouse('[data-hook="submit-application"]', parent=apply_modal)
             submissions_count += 1
-            print(f'🚀 Applied to job: {title_text} ({submissions_count} so far)')
+            logging.info(f'🚀 Applied to job: {title_text} ({submissions_count} so far)')
         else:
-            print('🔄 No submit button found')
+            logging.error('🔄 No submit button found')
             continue
 
     # Style points
     click_out_of_modal(s)
-    print("✅ Successfully applied to all jobs")
+    logging.info("✅ Successfully applied to all jobs")
 
-    listener.stop()
     update_job_tracking(submissions_count)
 
 def main():
-    # Track submissions for this session, and whether we should stop 
-    # the loop because of a keyboard interrupt
-    global submissions_count, stop_loop, job_list_len, job_list_visited, session_start_time
-    
-    # Initialize session start time
-    session_start_time = datetime.now()
-    
-    # Setup keyboard listener
-    listener = keyboard.Listener(on_press=on_press)
-    listener.start()
+    # Track submissions for this session
+    global submissions_count, job_list_len, tab_count, job_list_visited, session_start_time, did_log_submissions
     
     # Load environment variables
     load_dotenv()
@@ -196,7 +173,8 @@ def main():
     # Configure logging
     logging.basicConfig(
         level=logging.INFO,
-        format='%(asctime)s - %(levelname)s - %(message)s'
+        format='%(asctime)s - %(levelname)s - %(message)s',
+        datefmt='%H:%M'
     )
     logging.getLogger("selenium").setLevel(logging.WARNING)
     logging.getLogger("urllib3").setLevel(logging.WARNING)
@@ -221,19 +199,46 @@ def main():
     open_and_login(full_url, driver, s, EMAIL, PASSWORD)
     time.sleep(int(params['per_page']) / 100) # 10 seconds per 1000 jobs
 
-    apply_to_jobs_in_left_panel(s, listener)
+    # Try applying to all jobs on all pages, and allow retry on failure
+    while True:
+        try:
+            # Apply to jobs and then click next
+            session_start_time = datetime.now()
+            while True:
+                apply_to_jobs_in_left_panel(s)
+                if not s.element_exists('button[data-hook="search-pagination-next"]'):
+                    break
+                s.click_with_wait('button[data-hook="search-pagination-next"]')
+                tab_count += 1
+                print('tab count', tab_count)
+                time.sleep(int(params['per_page']) / 100)
+        except Exception as e:
+            logging.error(f"Error occurred : {str(e)}")
+        finally:
+            update_job_tracking(submissions_count)
+
+            # Reset global variables
+            submissions_count = 0
+            job_list_len = 0
+            tab_count = 1
+            job_list_visited = 0
+            did_log_submissions = False
+            session_start_time = None
+
+            input('Press Enter to continue...')
 
     return driver
 
 if __name__ == "__main__":
     try:
         driver = main()
-        print('PROGRAM DIED: OUTSIDE MAIN FUNCTION')
+        logging.info('PROGRAM DIED: OUTSIDE MAIN FUNCTION')
         time.sleep(60*60)
     except Exception as e:
-        update_job_tracking(submissions_count)
-        print('Error occurred in main:')
-        print(traceback.format_exc())
+        
+        logging.error('Error occurred in main:')
+        logging.error(traceback.format_exc())
         time.sleep(60*60)
     finally:
+        update_job_tracking(submissions_count)
         driver.quit()
