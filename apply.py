@@ -16,8 +16,6 @@ from datetime import datetime
 from utils.selenium_helper import Helper
 from utils.query_keywords import query_keywords, bad_keywords
 
-
-
 DEFAULT_STATE = {
     'submissions_count': 0,
     'job_list_len': 0,
@@ -26,7 +24,8 @@ DEFAULT_STATE = {
     'last_applied_job_idx_visited': 0,
     'did_log_submissions': False,
     'session_start_time': None,
-    'num_jobs_to_skip_initially': 0
+    'num_jobs_to_skip_initially': 0,
+    'jobs_per_page': 25
 }
 
 def open_and_login(url, driver, s, email, password):
@@ -95,7 +94,22 @@ def apply_to_jobs_in_left_panel(state, s):
     job_list = s.find_all_elements_with_wait("[data-hook='jobs-card']")
     assert job_list, '🔄 No jobs found'
     state['job_list_len'] = len(job_list)
-    for i in range(len(job_list)):
+
+    # Skip first few jobs
+    pages_to_skip = state['num_jobs_to_skip_initially'] // len(job_list)
+    remaining_jobs = state['num_jobs_to_skip_initially'] % len(job_list)
+
+    # Skip full pages and update last_job_idx_visited state
+    for i in range(pages_to_skip):
+        s.click_with_wait('button[data-hook="search-pagination-next"]', timeout=4)
+        state['num_jobs_to_skip_initially'] -= len(job_list)
+        state['last_job_idx_visited'] += len(job_list)
+        time.sleep(int(len(job_list)) / 100)
+    state['tab_count'] += pages_to_skip
+    state['last_job_idx_visited'] += remaining_jobs
+
+    # Apply to rest
+    for i in range(remaining_jobs, len(job_list)):
         state['last_job_idx_visited'] += 1
             
         click_out_of_modal(s)
@@ -141,12 +155,16 @@ def apply_to_jobs_in_left_panel(state, s):
             # s.actions.move_to_element(element).click().perform()
             s.click_web_element_with_mouse(element)
             # click 35px below the element
-            time.sleep(0.75)
+            time.sleep(1)
             s.actions.move_to_element_with_offset(element, 0, 35).click().perform()        
 
         # Click submit
         try:
-            submit_btn = s.find_element("//button[.//span[contains(text(), 'Submit Application')]]", by=By.XPATH)
+            submit_btn = None
+            if not selection_elements:
+                submit_btn = s.find_element_with_wait("//button[.//span[contains(text(), 'Submit Application')]]", by=By.XPATH, timeout=3)
+            else:
+                submit_btn = s.find_element("//button[.//span[contains(text(), 'Submit Application')]]", by=By.XPATH)
             # check if submit_btn is disabled, and if it is, remove disabled attribute
             if submit_btn.get_attribute('disabled'):
                 s.driver.execute_script("arguments[0].removeAttribute('disabled');", submit_btn)
@@ -164,15 +182,15 @@ def apply_to_jobs_in_left_panel(state, s):
                 logging.error('🔄 No submit button found or wasn\'t able to click it')
             continue
 
+    # Only update state if we went through loop without error
+    state['num_jobs_to_skip_initially'] = 0
+
     # Style points
     click_out_of_modal(s)
-    logging.info("✅ Successfully applied to all jobs")
+    logging.info("✅ Successfully applied to all jobs in current tab")
 
-    update_job_tracking(state)
-
-def main(state=None, driver=None, email=None, password=None):
+def main(state=None, driver=None, email=None, password=None, debug_level=logging.INFO):
     # Make a deep copy of state
-    state = state.copy() if state else {}
     for k, v in DEFAULT_STATE.items():
         if k not in state:
             state[k] = v
@@ -196,7 +214,7 @@ def main(state=None, driver=None, email=None, password=None):
 
     # Configure logging
     logging.basicConfig(
-        level=logging.DEBUG,
+        level=debug_level,
         format='%(asctime)s - %(levelname)s - %(message)s',
         datefmt='%H:%M'
     )
@@ -211,7 +229,7 @@ def main(state=None, driver=None, email=None, password=None):
     url = "https://jhu.joinhandshake.com/stu/postings"
     params = {
         "page": "1",
-        "per_page": "25",
+        "per_page": state['jobs_per_page'],
         "sort_direction": "desc",
         "sort_column": "default",
         "query": "software engineer",
@@ -223,7 +241,6 @@ def main(state=None, driver=None, email=None, password=None):
     open_and_login(full_url, driver, s, email, password)
     time.sleep(int(params['per_page']) / 100) # 10 seconds per 1000 jobs
 
-
     # Apply to jobs and then click next
     state['session_start_time'] = datetime.now()
     try:
@@ -232,9 +249,11 @@ def main(state=None, driver=None, email=None, password=None):
             s.click_with_wait('button[data-hook="search-pagination-next"]')
             state['tab_count'] += 1
             logging.info(f'⏭️ Going to next page: {state["tab_count"]}')
+            logging.info(f'state at this point: {state}')
             time.sleep(int(params['per_page']) / 100)
     except Exception as e:
         logging.error(f"Error occurred in main(): {str(e)}")
+        logging.error(traceback.format_exc())
     finally:
         update_job_tracking(state)
     

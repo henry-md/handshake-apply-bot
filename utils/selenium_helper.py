@@ -7,9 +7,6 @@ import time
 from functools import wraps
 from selenium.webdriver.common.action_chains import ActionChains
 
-# TODO
-# Refactor this so that with_mouse and with_wait are keyword arguments that can be set to True, and are False by default
-
 def log_execution_time(func):
     @wraps(func)
     def wrapper(self, *args, **kwargs):
