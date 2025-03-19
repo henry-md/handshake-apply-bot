@@ -14,25 +14,30 @@ from datetime import datetime
 
 # Custom imports
 from utils.selenium_helper import Helper
-from utils.query_keywords import query_keywords
+from utils.query_keywords import query_keywords, bad_keywords
 
-# Global variables
-submissions_count = 0
-job_list_len = 0
-tab_count = 1
-job_list_visited = 0
-did_log_submissions = False
-session_start_time = None
 
-def open_and_login(url, driver, s, EMAIL, PASSWORD):
+
+DEFAULT_STATE = {
+    'submissions_count': 0,
+    'job_list_len': 0,
+    'tab_count': 1,
+    'last_job_idx_visited': 0,
+    'last_applied_job_idx_visited': 0,
+    'did_log_submissions': False,
+    'session_start_time': None,
+    'num_jobs_to_skip_initially': 0
+}
+
+def open_and_login(url, driver, s, email, password):
     # Open page
     driver.get(url)
 
     # Login
     s.click_with_wait("[data-bind='click: track_sso_click']")
-    s.type_into_element_with_wait("[name='loginfmt']", EMAIL)
+    s.type_into_element_with_wait("[name='loginfmt']", email, timeout=10)
     s.click_with_wait("[type='submit']")
-    s.type_into_element_with_wait("[name='passwd']", PASSWORD)
+    s.type_into_element_with_wait("[name='passwd']", password, timeout=10)
     s.click_with_wait("[type='submit']")
     s.click_with_wait_without_error("[class='sso-button']", timeout=1.5)
 
@@ -44,13 +49,12 @@ def click_out_of_modal(s):
     if s.element_exists('[data-hook="apply-modal-content"]'):
         s.click_with_mouse('button[aria-label="dismiss"]')
 
-def update_job_tracking(submissions_count):
-    global did_log_submissions, session_start_time, tab_count
-    if did_log_submissions:
+def update_job_tracking(state):
+    if state['did_log_submissions']:
         return
     
     # Calculate session duration in minutes
-    session_duration = round((datetime.now() - session_start_time).total_seconds() / 60, 2)
+    session_duration = round((datetime.now() - state['session_start_time']).total_seconds() / 60, 2)
     
     tracking_file = "utils/job_tracking.json"
     
@@ -63,16 +67,17 @@ def update_job_tracking(submissions_count):
         data = {"total_submissions": 0, "sessions": []}
     
     # Update total submissions
-    data["total_submissions"] += submissions_count
+    data["total_submissions"] += state['submissions_count']
     
     # Add new session
     current_time = datetime.now().strftime("%m/%d/%y %I:%M%p").lower()
-    print('logging job list len', job_list_len, 'tab count', tab_count, 'job list visited', job_list_visited)
+    logging.info(f'Logging job list len: {state["job_list_len"]}, tab count: {state["tab_count"]}, job list visited: {state["last_job_idx_visited"]}')
     new_session = {
         "date": current_time,
-        "session_submissions": submissions_count,
-        "job_list_len": job_list_len * tab_count,
-        "job_list_visited": job_list_visited,
+        "session_submissions": state['submissions_count'],
+        "job_list_len": state['job_list_len'],
+        "last_job_idx_visited": state['last_job_idx_visited'],
+        "last_applied_job_idx_visited": state['last_applied_job_idx_visited'],
         "session_duration_minutes": session_duration
     }
     data["sessions"].append(new_session)
@@ -82,17 +87,16 @@ def update_job_tracking(submissions_count):
         json.dump(data, f, indent=4)
 
     # Mark that we've logged submissions
-    did_log_submissions = True
+    state['did_log_submissions'] = True
 
-def apply_to_jobs_in_left_panel(s):
-    global submissions_count, job_list_len, job_list_visited, session_start_time
+def apply_to_jobs_in_left_panel(state, s):
 
     # Apply to all jobs in left panel
     job_list = s.find_all_elements_with_wait("[data-hook='jobs-card']")
     assert job_list, '🔄 No jobs found'
-    job_list_len = len(job_list)
+    state['job_list_len'] = len(job_list)
     for i in range(len(job_list)):
-        job_list_visited += 1
+        state['last_job_idx_visited'] += 1
             
         click_out_of_modal(s)
 
@@ -122,6 +126,9 @@ def apply_to_jobs_in_left_panel(s):
             if not any(keyword.lower() in title_text.lower() for keyword in query_keywords):
                 logging.info(f"Skipping job with title: {title_text} - doesn't match keywords")
                 continue
+            if any(keyword.lower() in title_text.lower() for keyword in bad_keywords):
+                continue
+
         except Exception as e:
             logging.error(f"Failed to check job title: {str(e)}")
             continue
@@ -131,48 +138,65 @@ def apply_to_jobs_in_left_panel(s):
         apply_modal = s.find_element_with_wait('data-hook="apply-modal-content"', timeout=1) # Seems to use full time no matter what, strange.
         selection_elements = s.find_all_elements('[class="Select-control"] > *[class="Select-multi-value-wrapper"]', parent=apply_modal)
         for element in selection_elements:
+            # s.actions.move_to_element(element).click().perform()
             s.click_web_element_with_mouse(element)
-            time.sleep(0.75)
             # click 35px below the element
-            s.actions.move_to_element_with_offset(element, 0, 35).click().perform()
-        
+            time.sleep(0.75)
+            s.actions.move_to_element_with_offset(element, 0, 35).click().perform()        
+
         # Click submit
-        if s.element_exists('[data-hook="submit-application"]', parent=apply_modal):
-            s.click_with_mouse('[data-hook="submit-application"]', parent=apply_modal)
-            submissions_count += 1
-            logging.info(f'🚀 Applied to job: {title_text} ({submissions_count} so far)')
-        else:
-            logging.error('🔄 No submit button found')
+        try:
+            submit_btn = s.find_element("//button[.//span[contains(text(), 'Submit Application')]]", by=By.XPATH)
+            # check if submit_btn is disabled, and if it is, remove disabled attribute
+            if submit_btn.get_attribute('disabled'):
+                s.driver.execute_script("arguments[0].removeAttribute('disabled');", submit_btn)
+            s.actions.move_to_element(submit_btn).click().perform()
+            state['submissions_count'] += 1
+            logging.info(f'🚀 Applied to job: {title_text} ({state["submissions_count"]} so far)')
+            state['last_applied_job_idx_visited'] = state['last_job_idx_visited']
+        except Exception as e:
+            logging.error(f"Error clicking submit: {str(e)}")
+            # Sometimes Handshake's button stop working (with or without a bot) — that's their problem
+            if s.element_exists("//button[contains(@class, 'disabled') or @disabled]//span[contains(text(), 'Submit Application')]", by=By.XPATH, parent=apply_modal):
+                logging.error('😡 Wasn\'t able to remove disabled from Handshake submit button')
+            else:
+                # Otherwise it's prob our bad
+                logging.error('🔄 No submit button found or wasn\'t able to click it')
             continue
 
     # Style points
     click_out_of_modal(s)
     logging.info("✅ Successfully applied to all jobs")
 
-    update_job_tracking(submissions_count)
+    update_job_tracking(state)
 
-def main():
-    # Track submissions for this session
-    global submissions_count, job_list_len, tab_count, job_list_visited, session_start_time, did_log_submissions
-    
+def main(state=None, driver=None, email=None, password=None):
+    # Make a deep copy of state
+    state = state.copy() if state else {}
+    for k, v in DEFAULT_STATE.items():
+        if k not in state:
+            state[k] = v
+
     # Load environment variables
-    load_dotenv()
-    EMAIL = os.getenv("EMAIL")
-    PASSWORD = os.getenv("PASSWORD")
+    if email is None or password is None:
+        load_dotenv()
+        email = os.getenv("EMAIL")
+        password = os.getenv("PASSWORD")
 
     # Driver setup
-    chrome_options = Options()
-    # Uncomment the line below if you want to run in headless mode
-    # chrome_options.add_argument('--headless')
-    # Initialize Chrome driver with automatic ChromeDriver management
-    driver = webdriver.Chrome(
-        service=Service(ChromeDriverManager().install()),
-        options=chrome_options
-    )
+    if driver is None:
+        chrome_options = Options()
+        # Uncomment the line below if you want to run in headless mode
+        # chrome_options.add_argument('--headless')
+        # Initialize Chrome driver with automatic ChromeDriver management
+        driver = webdriver.Chrome(
+            service=Service(ChromeDriverManager().install()),
+            options=chrome_options
+        )
 
     # Configure logging
     logging.basicConfig(
-        level=logging.INFO,
+        level=logging.DEBUG,
         format='%(asctime)s - %(levelname)s - %(message)s',
         datefmt='%H:%M'
     )
@@ -196,49 +220,35 @@ def main():
     }
     full_url = f"{url}?{'&'.join([f'{k}={v}' for k, v in params.items()])}"
     
-    open_and_login(full_url, driver, s, EMAIL, PASSWORD)
+    open_and_login(full_url, driver, s, email, password)
     time.sleep(int(params['per_page']) / 100) # 10 seconds per 1000 jobs
 
-    # Try applying to all jobs on all pages, and allow retry on failure
-    while True:
-        try:
-            # Apply to jobs and then click next
-            session_start_time = datetime.now()
-            while True:
-                apply_to_jobs_in_left_panel(s)
-                if not s.element_exists('button[data-hook="search-pagination-next"]'):
-                    break
-                s.click_with_wait('button[data-hook="search-pagination-next"]')
-                tab_count += 1
-                print('tab count', tab_count)
-                time.sleep(int(params['per_page']) / 100)
-        except Exception as e:
-            logging.error(f"Error occurred : {str(e)}")
-        finally:
-            update_job_tracking(submissions_count)
 
-            # Reset global variables
-            submissions_count = 0
-            job_list_len = 0
-            tab_count = 1
-            job_list_visited = 0
-            did_log_submissions = False
-            session_start_time = None
-
-            input('Press Enter to continue...')
-
-    return driver
+    # Apply to jobs and then click next
+    state['session_start_time'] = datetime.now()
+    try:
+        while True:
+            apply_to_jobs_in_left_panel(state, s)
+            s.click_with_wait('button[data-hook="search-pagination-next"]')
+            state['tab_count'] += 1
+            logging.info(f'⏭️ Going to next page: {state["tab_count"]}')
+            time.sleep(int(params['per_page']) / 100)
+    except Exception as e:
+        logging.error(f"Error occurred in main(): {str(e)}")
+    finally:
+        update_job_tracking(state)
+    
+    return state, driver
 
 if __name__ == "__main__":
     try:
-        driver = main()
-        logging.info('PROGRAM DIED: OUTSIDE MAIN FUNCTION')
-        time.sleep(60*60)
+        state, driver = main()
+        logging.info('🪦 Program died: outside main function')
+        time.sleep(3600)
     except Exception as e:
-        
-        logging.error('Error occurred in main:')
+        logging.error('🪦 Error occurred in main:')
         logging.error(traceback.format_exc())
-        time.sleep(60*60)
+        time.sleep(3600)
     finally:
-        update_job_tracking(submissions_count)
+        update_job_tracking(state)
         driver.quit()

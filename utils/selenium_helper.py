@@ -27,6 +27,30 @@ class Helper:
     self.logging = logging
     self.actions = ActionChains(driver)
 
+  def readable_web_element(self, element: WebElement | None) -> str:
+    if not element:
+      return 'No element found'
+    
+    # Get tag name and HTML content
+    tag_name = element.tag_name
+    html_content = element.get_attribute("innerHTML")
+    
+    # Get all attributes as a dictionary
+    attrs = self.driver.execute_script("""
+      let attrs = {};
+      let element = arguments[0];
+      for (let i = 0; i < element.attributes.length; i++) {
+        attrs[element.attributes[i].name] = element.attributes[i].value;
+      }
+      return attrs;
+    """, element)
+    
+    # Format attributes as k/v pairs
+    attr_str = ' '.join([f'{name}="{value}"' for name, value in attrs.items()])
+    attr_str = ' ' + attr_str if attr_str else ''  # Add leading space if attributes exist
+    
+    return f'<{tag_name}{attr_str}>{html_content}</{tag_name}>'
+
   def web_element_exists(self, element: WebElement) -> bool:
     try:
       element.is_displayed()
@@ -34,11 +58,11 @@ class Helper:
     except:
       return False
     
-  def element_exists(self, selector: str, parent=None) -> bool:
+  def element_exists(self, selector: str, by=By.CSS_SELECTOR, parent=None) -> bool:
     try:
       if parent is None:
         parent = self.driver
-      return bool(parent.find_element(By.CSS_SELECTOR, selector))
+      return bool(parent.find_element(by, selector))
     except:
       return False
     
@@ -46,12 +70,12 @@ class Helper:
     self.driver.execute_script("arguments[0].scrollIntoView();", element)
 
   @log_execution_time
-  def find_element_with_wait(self, selector: str, parent=None, timeout=3) -> WebElement:
+  def find_element_with_wait(self, selector: str, by=By.CSS_SELECTOR, parent=None, timeout=3) -> WebElement:
     try:
       if parent is None:
         parent = self.driver
       res = WebDriverWait(parent, timeout).until(
-        EC.element_to_be_clickable((By.CSS_SELECTOR, selector))
+        EC.element_to_be_clickable((by, selector))
       )
       self.logging.debug(f'Searching for: {selector}; Found')
       return res
@@ -128,7 +152,7 @@ class Helper:
       """, element)
       self.logging.debug(f'Clicked')
     except:
-      self.logging.debug(f'Failed to click: {element}')
+      self.logging.debug(f'Failed to click: {self.readable_web_element(element)}')
 
   def click_with_mouse(self, selector: str, parent=None) -> None:
     try:
@@ -144,16 +168,16 @@ class Helper:
   def click_web_element_with_mouse(self, element) -> None:
     try:
       self.actions.move_to_element(element).click().perform()
-      self.logging.debug(f'Clicked with mouse: {element}')
+      self.logging.debug(f'Clicked with mouse: {self.readable_web_element(element)}')
     except:
       self.logging.debug(f'Failed to click web element')
 
   @log_execution_time
-  def click_with_wait(self, selector: str, parent=None, timeout=3) -> None:
+  def click_with_wait(self, selector: str, by=By.CSS_SELECTOR, parent=None, timeout=3) -> None:
     self.logging.debug(f'Clicking: {selector}')
     if parent is None:
       parent = self.driver
-    element = self.find_element_with_wait(selector, parent)
+    element = self.find_element_with_wait(selector, by, parent)
     if not element: raise Exception(f'Element not found, so can\'t click: {selector}')
     if self.driver is None:
       self.click_web_element(element, self.driver)
@@ -186,11 +210,17 @@ class Helper:
     self.logging.debug(f'Clicked')
 
   @log_execution_time
-  def type_into_element_with_wait(self, selector: str, text, parent=None) -> None:
+  def type_into_element_with_wait(self, selector: str, text, by=By.CSS_SELECTOR, parent=None, timeout=None) -> None:
     self.logging.debug(f'Typing: {text} into: {selector}')
     if parent is None:
-      parent = self.driver
-    element = self.find_element_with_wait(selector, parent)
+        parent = self.driver
+    
+    # Method 1: Using kwargs dictionary
+    kwargs = {'selector': selector, 'by': by, 'parent': parent}
+    if timeout is not None:
+        kwargs['timeout'] = timeout
+    element = self.find_element_with_wait(**kwargs)
+
     if not element: raise Exception(f'Element not found, so can\'t type: {selector}')
     element.send_keys(text)
     self.logging.debug(f'Typed')
