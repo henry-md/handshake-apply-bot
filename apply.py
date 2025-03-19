@@ -20,8 +20,8 @@ DEFAULT_STATE = {
     'submissions_count': 0,
     'job_list_len': 0,
     'tab_count': 1,
-    'last_job_idx_visited': 0,
-    'last_applied_job_idx_visited': 0,
+    'visited_indices': [0, 0],  # [start_idx, current_idx]
+    'last_applied_job_idx': 0,  # idx of last successful application
     'did_log_submissions': False,
     'session_start_time': None,
     'num_jobs_to_skip_initially': 0,
@@ -63,24 +63,25 @@ def update_job_tracking(state):
             data = json.load(f)
     except (FileNotFoundError, json.JSONDecodeError):
         # Initialize if file doesn't exist or is invalid
-        data = {"total_submissions": 0, "sessions": []}
+        data = {"total_submissions": 0, "last_applied_job_idx": 0, "sessions": []}
     
-    # Update total submissions
+    # Update cumulative stats
     data["total_submissions"] += state['submissions_count']
+    data["last_applied_job_idx"] = max(data["last_applied_job_idx"], state['last_applied_job_idx'])
     
     # Add new session
     current_time = datetime.now().strftime("%m/%d/%y %I:%M%p").lower()
-    logging.info(f'Logging job list len: {state["job_list_len"]}, tab count: {state["tab_count"]}, job list visited: {state["last_job_idx_visited"]}')
+    logging.info(f'Logging job list len: {state["job_list_len"]}, tab count: {state["tab_count"]}, visited range: {state["visited_indices"]}')
     new_session = {
         "date": current_time,
         "session_submissions": state['submissions_count'],
         "job_list_len": state['job_list_len'],
-        "last_job_idx_visited": state['last_job_idx_visited'],
-        "last_applied_job_idx_visited": state['last_applied_job_idx_visited'],
+        "visited_indices": state['visited_indices'],
+        "last_applied_job_idx": state['last_applied_job_idx'],
         "session_duration_minutes": session_duration
     }
     data["sessions"].append(new_session)
-    
+        
     # Write updated data
     with open(tracking_file, 'w') as f:
         json.dump(data, f, indent=4)
@@ -89,7 +90,6 @@ def update_job_tracking(state):
     state['did_log_submissions'] = True
 
 def apply_to_jobs_in_left_panel(state, s):
-
     # Apply to all jobs in left panel
     job_list = s.find_all_elements_with_wait("[data-hook='jobs-card']")
     assert job_list, '🔄 No jobs found'
@@ -99,18 +99,20 @@ def apply_to_jobs_in_left_panel(state, s):
     pages_to_skip = state['num_jobs_to_skip_initially'] // len(job_list)
     remaining_jobs = state['num_jobs_to_skip_initially'] % len(job_list)
 
-    # Skip full pages and update last_job_idx_visited state
+    # Skip full pages and update visited_indices state
     for i in range(pages_to_skip):
         s.click_with_wait('button[data-hook="search-pagination-next"]', timeout=4)
         state['num_jobs_to_skip_initially'] -= len(job_list)
-        state['last_job_idx_visited'] += len(job_list)
+        state['visited_indices'][0] += len(job_list)
+        state['visited_indices'][1] += len(job_list)
         time.sleep(int(len(job_list)) / 100)
     state['tab_count'] += pages_to_skip
-    state['last_job_idx_visited'] += remaining_jobs
+    state['visited_indices'][0] += remaining_jobs
+    state['visited_indices'][1] += remaining_jobs
 
     # Apply to rest
     for i in range(remaining_jobs, len(job_list)):
-        state['last_job_idx_visited'] += 1
+        state['visited_indices'][1] += 1
             
         click_out_of_modal(s)
 
@@ -170,8 +172,8 @@ def apply_to_jobs_in_left_panel(state, s):
                 s.driver.execute_script("arguments[0].removeAttribute('disabled');", submit_btn)
             s.actions.move_to_element(submit_btn).click().perform()
             state['submissions_count'] += 1
+            state['last_applied_job_idx'] = state['visited_indices'][1]
             logging.info(f'🚀 Applied to job: {title_text} ({state["submissions_count"]} so far)')
-            state['last_applied_job_idx_visited'] = state['last_job_idx_visited']
         except Exception as e:
             logging.error(f"Error clicking submit: {str(e)}")
             # Sometimes Handshake's button stop working (with or without a bot) — that's their problem

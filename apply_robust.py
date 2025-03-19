@@ -9,20 +9,23 @@ import time
 from apply import update_job_tracking
 from apply import DEFAULT_STATE
 
-def get_num_jobs_to_skip_initially():
-    with open("utils/job_tracking.json", "r") as f:
-        data = json.load(f)
-    return data["last_applied_job_idx_visited"] if "last_applied_job_idx_visited" in data else 0
+def get_last_applied_job_idx():
+    try:
+        with open("utils/job_tracking.json", "r") as f:
+            data = json.load(f)
+        return data["last_applied_job_idx"] if "last_applied_job_idx" in data else 0
+    except (FileNotFoundError, json.JSONDecodeError):
+        return 0
 
 STATE = {
     'submissions_count': 0,
     'job_list_len': 0,
     'tab_count': 1,
-    'last_job_idx_visited': 0,
-    'last_applied_job_idx_visited': 0,
+    'visited_indices': [0, 0],  # [start_idx, current_idx]
+    'last_applied_job_idx': -1,  # idx of last successful application
     'did_log_submissions': False,
     'session_start_time': None,
-    'num_jobs_to_skip_initially': 100, # get_num_jobs_to_skip_initially()
+    'num_jobs_to_skip_initially': get_last_applied_job_idx(),
     'jobs_per_page': 50
 }
 
