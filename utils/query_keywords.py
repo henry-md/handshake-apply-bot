@@ -6,6 +6,10 @@ I'm trying to make a bot to apply to jobs, but I don't want to apply to every jo
 Note: Jobs will be applied to that have at least 1 match in query_keywords AND exactly 0 matches in bad_keywords.
 """
 
+# What will be typed in Handshake's search bar to find jobs
+query_search = "software engineer"
+
+# Keywords to search for in job titles
 query_keywords = \
     ['software',
      'developer', 

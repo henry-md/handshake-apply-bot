@@ -26,7 +26,7 @@ STATE = {
     'did_log_submissions': False,
     'session_start_time': None,
     'num_jobs_to_skip_initially': get_last_applied_job_idx(),
-    'jobs_per_page': 50
+    'jobs_per_page': 50,
 }
 
 # Check that all keys in STATE are in DEFAULT_STATE

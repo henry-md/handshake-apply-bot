@@ -14,7 +14,7 @@ from datetime import datetime
 
 # Custom imports
 from utils.selenium_helper import Helper
-from utils.query_keywords import query_keywords, bad_keywords
+from utils.query_keywords import query_keywords, bad_keywords, query_search
 
 DEFAULT_STATE = {
     'submissions_count': 0,
@@ -25,7 +25,7 @@ DEFAULT_STATE = {
     'did_log_submissions': False,
     'session_start_time': None,
     'num_jobs_to_skip_initially': 0,
-    'jobs_per_page': 25
+    'jobs_per_page': 25,
 }
 
 def open_and_login(url, driver, s, email, password):
@@ -191,7 +191,7 @@ def apply_to_jobs_in_left_panel(state, s):
     click_out_of_modal(s)
     logging.info("✅ Successfully applied to all jobs in current tab")
 
-def main(state=None, driver=None, email=None, password=None, debug_level=logging.INFO):
+def main(state=DEFAULT_STATE, driver=None, email=None, password=None, debug_level=logging.INFO):
     # Make a deep copy of state
     for k, v in DEFAULT_STATE.items():
         if k not in state:
@@ -234,7 +234,7 @@ def main(state=None, driver=None, email=None, password=None, debug_level=logging
         "per_page": state['jobs_per_page'],
         "sort_direction": "desc",
         "sort_column": "default",
-        "query": "software engineer",
+        "query": query_search,
         "employment_type_names[]": "Full-Time",
         "job.job_types[]": "9",
     }

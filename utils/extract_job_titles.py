@@ -9,6 +9,7 @@ import sys
 import time
 import traceback
 import logging
+from query_keywords import query_search
 
 # Import helper functions from apply.py
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -30,7 +31,7 @@ def main():
 
     # Configure logging
     logging.basicConfig(
-        level=logging.DEBUG,
+        level=logging.INFO,
         format='%(asctime)s - %(levelname)s - %(message)s'
     )
     logging.getLogger("selenium").setLevel(logging.WARNING)
@@ -43,11 +44,11 @@ def main():
     # Construct URL with params (same as in apply.py)
     url = "https://jhu.joinhandshake.com/stu/postings"
     params = {
-        "page": "1",
-        "per_page": "1000",
+        "page": 1,
+        "per_page": 1000,
         "sort_direction": "desc",
         "sort_column": "default",
-        "query": "software engineer",
+        "query": query_search,
         "employment_type_names[]": "Full-Time",
         "job.job_types[]": "9",
     }
@@ -56,12 +57,12 @@ def main():
     # Login to the platform
     open_and_login(full_url, driver, s, EMAIL, PASSWORD)
 
-    time.sleep(10)
+    # Wait for the job list to load
+    time.sleep(params['per_page'] / 100)
 
     # Find all job cards
     # Apply to all jobs in left panel
-    job_preview_panel = s.find_element_with_wait("[aria-label='Job Preview']")
-    job_list = s.find_all_elements_with_wait("[data-hook='jobs-card']")
+    job_list = s.find_all_elements_with_wait("[data-hook='jobs-card']", timeout=10)
     assert job_list, '🔄 No jobs found'
     
     # Extract job titles
@@ -69,7 +70,6 @@ def main():
     for job in job_list:
         try:
             title_element = job.find_element("css selector", "h3")
-            print('title_element:', title_element.get_attribute('class'))
             title_text = title_element.text
             job_titles.append(title_text)
         except:
