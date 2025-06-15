@@ -218,7 +218,6 @@ def apply_to_jobs_in_left_panel(state, s):
                 if not selection_fill:
                     raise Exception('🔄 No selection fill found')
                 s.click_web_element(selection_fill)
-                time.sleep(3)
         except Exception as e:
             logging.error(f"✌️ Ts too complicated twin. Error clicking selections, will skip to next job. Error: {str(e)}")
             continue

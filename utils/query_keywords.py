@@ -43,8 +43,8 @@ good_keywords = {
         'cloud',
         'machine learning',
         'ml engineer',
-        'ai engineer',
-        'ai solutions',
+        'ai',
+        'ml',
         'artificial intelligence',
         'nlp',
         'data engineer',
@@ -64,12 +64,17 @@ good_keywords = {
         'mean-stack',
         'mern stack',
         'mern-stack',
+        'computer vision',
+        'computer-vision',
+        'computer science',
     ]
 }
 
 bad_keywords = [
     # 'unpaid',
     'not paid',
-    'full time',
-    'full-time'
+    'unpaid',
+    'instructor',
+    'teacher',
+    'teaching',
 ]
