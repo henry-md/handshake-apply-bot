@@ -7,11 +7,13 @@ Note: Jobs will be applied to that have at least 1 match in query_keywords AND e
 """
 
 # What will be typed in Handshake's search bar to find jobs
-query_search = "software engineer"
+query_search = "software engineer internship"
 
 # Keywords to search for in job titles
 query_keywords = \
-    ['software',
+    ['intern',
+     'internship',
+     'software',
      'developer', 
      'devops', 
      'backend', 
@@ -54,9 +56,8 @@ query_keywords = \
     ]
 
 bad_keywords = [
-    'intern',
-    'unpaid',
+    # 'unpaid',
     'not paid',
-    'part time',
-    'part-time',
+    'full time',
+    'full-time'
 ]

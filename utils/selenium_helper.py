@@ -141,15 +141,16 @@ class Helper:
   def click_web_element(self, element) -> None:
     try:
       self.logging.debug(f'Clicking: {element}')
-      self.driver.execute_script("""
-        arguments[0].scrollIntoView(); 
-        arguments[0].click();
-        arguments[0].dispatchEvent(new Event('change', { bubbles: true }));
-        arguments[0].dispatchEvent(new Event('input', { bubbles: true }));
-      """, element)
+      element.click()
+      # self.driver.execute_script("""
+      #   arguments[0].scrollIntoView(); 
+      #   arguments[0].click();
+      #   arguments[0].dispatchEvent(new Event('change', { bubbles: true }));
+      #   arguments[0].dispatchEvent(new Event('input', { bubbles: true }));
+      # """, element)
       self.logging.debug(f'Clicked')
     except:
-      self.logging.debug(f'Failed to click: {self.readable_web_element(element)}')
+      self.logging.error(f'Failed to click: {self.readable_web_element(element)}')
 
   def click_with_mouse(self, selector: str, parent=None) -> None:
     try:

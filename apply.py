@@ -15,7 +15,9 @@ from datetime import datetime
 # Custom imports
 from utils.selenium_helper import Helper
 from utils.query_keywords import query_keywords, bad_keywords, query_search
+from utils.timer import timer
 
+# State variables to fully define session state. Some variables can be changed by user like jobs_per_page.
 DEFAULT_STATE = {
     'submissions_count': 0,
     'job_list_len': 0,
@@ -28,7 +30,29 @@ DEFAULT_STATE = {
     'jobs_per_page': 25,
 }
 
+# Handshake-specific selectors — these may need to be updated over time with site updates.
+# If the code suddenly breaks one day, it's likely here.
+SELECTORS = {
+    'job_block': "[data-hook*='job-result-card']", # a single job application block in the left column
+    'job_block_title': "[id]",
+    'apply_btn': "[aria-label='Apply']",
+    'apply_btns_internal_or_external': ["[aria-label='Apply']", "[aria-label='Apply externally']"],
+    'submit_btn': "//button[contains(text(), 'Submit Application')]",
+    'submit_btn_disabled': "//button[contains(@class, 'disabled') or @disabled][contains(text(), 'Submit Application')]",
+    'dismiss_btn': "button[aria-label='Cancel application']", # X button at top right of application modal for a specific job
+    'pagination_next_btn': "button[area-label='next page']",
+    'apply_modal_content': "[data-enter][data-dialog='true']",
+    'selection_elements': "[aria-haspopup='listbox'][role='combobox'][value='']",
+}
+
+@timer
 def open_and_login(url, driver, s, email, password):
+    """
+    Opens url [handshake] and logs in with email and password.
+
+    driver (webdriver.Chrome): Selenium WebDriver instance for browser automation
+    """
+
     # Open page
     driver.get(url)
 
@@ -45,10 +69,17 @@ def open_and_login(url, driver, s, email, password):
         driver.get(url)
 
 def click_out_of_modal(s):
-    if s.element_exists('[data-hook="apply-modal-content"]'):
-        s.click_with_mouse('button[aria-label="dismiss"]')
+    """
+    Clicks out of a modal if there is one. Throws nothing if no modal exists.
+    """
+    if s.element_exists(SELECTORS['apply_modal_content']):
+        s.click_with_mouse(SELECTORS['dismiss_btn'])
 
+@timer
 def update_job_tracking(state):
+    """
+    Updates job tracking file with current state.
+    """
     if state['did_log_submissions']:
         return
     
@@ -57,6 +88,7 @@ def update_job_tracking(state):
     
     tracking_file = "utils/job_tracking.json"
     
+    # Initialize empty data file if it doesn't exist, and initialize `data` either way
     try:
         # Read existing data
         with open(tracking_file, 'r') as f:
@@ -69,7 +101,7 @@ def update_job_tracking(state):
     data["total_submissions"] += state['submissions_count']
     data["last_applied_job_idx"] = max(data["last_applied_job_idx"], state['last_applied_job_idx'])
     
-    # Add new session
+    # Add new session to `data.sessions`
     current_time = datetime.now().strftime("%m/%d/%y %I:%M%p").lower()
     logging.info(f'Logging job list len: {state["job_list_len"]}, tab count: {state["tab_count"]}, visited range: {state["visited_indices"]}')
     new_session = {
@@ -82,16 +114,23 @@ def update_job_tracking(state):
     }
     data["sessions"].append(new_session)
         
-    # Write updated data
+    # Write updated data to data file
     with open(tracking_file, 'w') as f:
         json.dump(data, f, indent=4)
 
     # Mark that we've logged submissions
     state['did_log_submissions'] = True
 
+@timer
 def apply_to_jobs_in_left_panel(state, s):
+    """
+    Apply to all jobs in this page (and no other pages). Read jobs from open left panel, skip jobs (& toggle necessary pages), and apply to the rest that fit our criteria: internal applications (i.e. no link to apply on their site) w/ one good keyword and none of the bad keywords.
+
+    Before applying to every job, it will try to refresh the list of jobs if it's gotten stale and some job no longer exists.
+    """
+
     # Apply to all jobs in left panel
-    job_list = s.find_all_elements_with_wait("[data-hook='jobs-card']")
+    job_list = s.find_all_elements_with_wait(SELECTORS['job_block'])
     assert job_list, '🔄 No jobs found'
     state['job_list_len'] = len(job_list)
 
@@ -101,7 +140,7 @@ def apply_to_jobs_in_left_panel(state, s):
 
     # Skip full pages and update visited_indices state
     for i in range(pages_to_skip):
-        s.click_with_wait('button[data-hook="search-pagination-next"]', timeout=4)
+        s.click_with_wait(SELECTORS['pagination_next_btn'], timeout=4)
         state['num_jobs_to_skip_initially'] -= len(job_list)
         state['visited_indices'][0] += len(job_list)
         state['visited_indices'][1] += len(job_list)
@@ -119,7 +158,7 @@ def apply_to_jobs_in_left_panel(state, s):
         # Revive job_list if stale
         if not job_list[i] or not s.web_element_exists(job_list[i]):
             old_len = len(job_list)
-            job_list = s.find_all_elements_with_wait("[data-hook='jobs-card']")
+            job_list = s.find_all_elements_with_wait(SELECTORS['job_block'])
             assert job_list and len(job_list) == old_len, '🔄 Failed to revive job_list'
         
         # Scroll and click on job in left panel
@@ -131,13 +170,14 @@ def apply_to_jobs_in_left_panel(state, s):
             continue
         
         # Skip external applications
-        apply_btn, idx = s.find_any_element_with_wait("[aria-label='Apply']", "[aria-label='Apply Externally']")
-        if idx == 1:
+        apply_btn, idx = s.find_any_element_with_wait(*SELECTORS['apply_btns_internal_or_external'])
+        print('🔄 apply_btn', apply_btn, 'idx', idx)
+        if idx == 1 or idx == -1:
             continue
             
         # Skip jobs that don't match any keyword
         try:
-            title_element = job_list[i].find_element("css selector", "h3")
+            title_element = s.find_element(SELECTORS['job_block_title'], parent=job_list[i])
             title_text = title_element.text
             if not any(keyword.lower() in title_text.lower() for keyword in query_keywords):
                 logging.info(f"Skipping job with title: {title_text} - doesn't match keywords")
@@ -149,24 +189,28 @@ def apply_to_jobs_in_left_panel(state, s):
             logging.error(f"Failed to check job title: {str(e)}")
             continue
 
-        # Apply to the specific job in right panel
+        # Apply to the specific job in right panel: for every job, click it, and simply click 35px below all the input selections.
+        print('📝 Trying to apply to job w/ title', title_text)
         s.click_web_element(apply_btn)
-        apply_modal = s.find_element_with_wait('data-hook="apply-modal-content"', timeout=1) # Seems to use full time no matter what, strange.
-        selection_elements = s.find_all_elements('[class="Select-control"] > *[class="Select-multi-value-wrapper"]', parent=apply_modal)
+        apply_modal = s.find_element_with_wait(SELECTORS['apply_modal_content'], timeout=1) # Seems to use full time no matter what, strange.
+        selection_elements = s.find_all_elements(SELECTORS['selection_elements'], parent=apply_modal)
         for element in selection_elements:
             # s.actions.move_to_element(element).click().perform()
             s.click_web_element_with_mouse(element)
             # click 35px below the element
+            print('❗❗❗ clicking 35px below the element')
             time.sleep(1)
+            s.actions.move_to_element_with_offset(element, 0, 35)
+            time.sleep(2)
             s.actions.move_to_element_with_offset(element, 0, 35).click().perform()        
-
-        # Click submit
+            print('❗❗❗ finished trying to 35px below the element')
+        # Click submit on this job app
         try:
             submit_btn = None
             if not selection_elements:
-                submit_btn = s.find_element_with_wait("//button[.//span[contains(text(), 'Submit Application')]]", by=By.XPATH, timeout=3)
+                submit_btn = s.find_element_with_wait(SELECTORS['submit_btn'], by=By.XPATH, timeout=3)
             else:
-                submit_btn = s.find_element("//button[.//span[contains(text(), 'Submit Application')]]", by=By.XPATH)
+                submit_btn = s.find_element(SELECTORS['submit_btn'], by=By.XPATH)
             # check if submit_btn is disabled, and if it is, remove disabled attribute
             if submit_btn.get_attribute('disabled'):
                 s.driver.execute_script("arguments[0].removeAttribute('disabled');", submit_btn)
@@ -177,12 +221,13 @@ def apply_to_jobs_in_left_panel(state, s):
         except Exception as e:
             logging.error(f"Error clicking submit: {str(e)}")
             # Sometimes Handshake's button stop working (with or without a bot) — that's their problem
-            if s.element_exists("//button[contains(@class, 'disabled') or @disabled]//span[contains(text(), 'Submit Application')]", by=By.XPATH, parent=apply_modal):
+            if s.element_exists(SELECTORS['submit_btn_disabled'], by=By.XPATH, parent=apply_modal):
                 logging.error('😡 Wasn\'t able to remove disabled from Handshake submit button')
             else:
                 # Otherwise it's prob our bad
                 logging.error('🔄 No submit button found or wasn\'t able to click it')
             continue
+        time.sleep(15)
 
     # Only update state if we went through loop without error
     state['num_jobs_to_skip_initially'] = 0
@@ -191,8 +236,13 @@ def apply_to_jobs_in_left_panel(state, s):
     click_out_of_modal(s)
     logging.info("✅ Successfully applied to all jobs in current tab")
 
+@timer
 def main(state=DEFAULT_STATE, driver=None, email=None, password=None, debug_level=logging.INFO):
-    # Make a deep copy of state
+    """
+    A lot of setup: Load env variables (email, password), set up driver (for )
+    """
+
+    # Ensure state has all the keys in DEFAULT_STATE
     for k, v in DEFAULT_STATE.items():
         if k not in state:
             state[k] = v
@@ -248,7 +298,7 @@ def main(state=DEFAULT_STATE, driver=None, email=None, password=None, debug_leve
     try:
         while True:
             apply_to_jobs_in_left_panel(state, s)
-            s.click_with_wait('button[data-hook="search-pagination-next"]')
+            s.click_with_wait(SELECTORS['pagination_next_btn'])
             state['tab_count'] += 1
             logging.info(f'⏭️ Going to next page: {state["tab_count"]}')
             logging.info(f'state at this point: {state}')
