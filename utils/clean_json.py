@@ -34,5 +34,5 @@ def clean_sessions(min_submissions):
             pprint(session)
 
 if __name__ == "__main__":
-    min_submissions = 1  # Set your threshold here
+    min_submissions = 3  # Set your threshold here
     clean_sessions(min_submissions)

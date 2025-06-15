@@ -39,10 +39,11 @@ SELECTORS = {
     'apply_btns_internal_or_external': ["[aria-label='Apply']", "[aria-label='Apply externally']"],
     'submit_btn': "//button[contains(text(), 'Submit Application')]",
     'submit_btn_disabled': "//button[contains(@class, 'disabled') or @disabled][contains(text(), 'Submit Application')]",
-    'dismiss_btn': "button[aria-label='Cancel application']", # X button at top right of application modal for a specific job
-    'pagination_next_btn': "button[area-label='next page']",
+    'dismiss_btn': "button[aria-label='Cancel application']", # x button at top right of application modal for a specific job
+    'pagination_next_btn': "button[aria-label='next page']",
     'apply_modal_content': "[data-enter][data-dialog='true']",
     'selection_elements': "[aria-haspopup='listbox'][role='combobox'][value='']",
+    'selection_elements_to_fill': "//div[@role='listbox']/div[@role='option' and @aria-selected='false' and (text()='Supporting Documents' or text()='Transcript' or text()='Cover Letter' or text()='Henry Deutsch Resume')]",
 }
 
 @timer
@@ -103,7 +104,7 @@ def update_job_tracking(state):
     
     # Add new session to `data.sessions`
     current_time = datetime.now().strftime("%m/%d/%y %I:%M%p").lower()
-    logging.info(f'Logging job list len: {state["job_list_len"]}, tab count: {state["tab_count"]}, visited range: {state["visited_indices"]}')
+    logging.debug(f'Logging job list len: {state["job_list_len"]}, tab count: {state["tab_count"]}, visited range: {state["visited_indices"]}')
     new_session = {
         "date": current_time,
         "session_submissions": state['submissions_count'],
@@ -160,6 +161,7 @@ def apply_to_jobs_in_left_panel(state, s):
             old_len = len(job_list)
             job_list = s.find_all_elements_with_wait(SELECTORS['job_block'])
             assert job_list and len(job_list) == old_len, '🔄 Failed to revive job_list'
+            logging.info(f'💪 Revived job_list to length {len(job_list)}')
         
         # Scroll and click on job in left panel
         try:
@@ -171,7 +173,6 @@ def apply_to_jobs_in_left_panel(state, s):
         
         # Skip external applications
         apply_btn, idx = s.find_any_element_with_wait(*SELECTORS['apply_btns_internal_or_external'])
-        print('🔄 apply_btn', apply_btn, 'idx', idx)
         if idx == 1 or idx == -1:
             continue
             
@@ -180,7 +181,7 @@ def apply_to_jobs_in_left_panel(state, s):
             title_element = s.find_element(SELECTORS['job_block_title'], parent=job_list[i])
             title_text = title_element.text
             if not any(keyword.lower() in title_text.lower() for keyword in query_keywords):
-                logging.info(f"Skipping job with title: {title_text} - doesn't match keywords")
+                logging.info(f"✋ Skipping job with title: {title_text} - doesn't match keywords")
                 continue
             if any(keyword.lower() in title_text.lower() for keyword in bad_keywords):
                 continue
@@ -190,20 +191,32 @@ def apply_to_jobs_in_left_panel(state, s):
             continue
 
         # Apply to the specific job in right panel: for every job, click it, and simply click 35px below all the input selections.
-        print('📝 Trying to apply to job w/ title', title_text)
+        print('')
+        logging.info(f'📝 Trying to apply to job w/ title: {title_text}')
         s.click_web_element(apply_btn)
         apply_modal = s.find_element_with_wait(SELECTORS['apply_modal_content'], timeout=1) # Seems to use full time no matter what, strange.
         selection_elements = s.find_all_elements(SELECTORS['selection_elements'], parent=apply_modal)
-        for element in selection_elements:
-            # s.actions.move_to_element(element).click().perform()
-            s.click_web_element_with_mouse(element)
-            # click 35px below the element
-            print('❗❗❗ clicking 35px below the element')
-            time.sleep(1)
-            s.actions.move_to_element_with_offset(element, 0, 35)
-            time.sleep(2)
-            s.actions.move_to_element_with_offset(element, 0, 35).click().perform()        
-            print('❗❗❗ finished trying to 35px below the element')
+        error_clicking_selections_flag = False
+        for selection_input in selection_elements:
+            # Click selection autofill if it's already available
+            selection_fill = s.find_element(SELECTORS['selection_elements_to_fill'], by=By.XPATH)
+            if selection_fill:
+                s.click_web_element(selection_fill)
+                continue
+
+            # Otherwise, click the search box first to get the autofill option
+            selection_input.click()
+            selection_fill = s.find_element_with_wait(SELECTORS['selection_elements_to_fill'], by=By.XPATH, timeout=3)
+            if not selection_fill:
+                error_clicking_selections_flag = True
+                break
+            s.click_web_element(selection_fill)
+            time.sleep(3)
+        
+        if error_clicking_selections_flag:
+            logging.info('✌️ Ts too complicated twin. Error clicking selections, will skip to next job.')
+            continue
+
         # Click submit on this job app
         try:
             submit_btn = None
@@ -275,7 +288,9 @@ def main(state=DEFAULT_STATE, driver=None, email=None, password=None, debug_leve
     logging.getLogger("webdriver_manager").setLevel(logging.WARNING)
 
     # Get helper functions
-    s = Helper(driver, logging)
+    helper_logger = logging.getLogger('selenium_helper')
+    helper_logger.setLevel(logging.CRITICAL)
+    s = Helper(driver, helper_logger)
 
     # Construct full URL with params
     url = "https://jhu.joinhandshake.com/stu/postings"
@@ -301,11 +316,11 @@ def main(state=DEFAULT_STATE, driver=None, email=None, password=None, debug_leve
             s.click_with_wait(SELECTORS['pagination_next_btn'])
             state['tab_count'] += 1
             logging.info(f'⏭️ Going to next page: {state["tab_count"]}')
-            logging.info(f'state at this point: {state}')
+            logging.debug(f'state at this point: {state}')
             time.sleep(int(params['per_page']) / 100)
     except Exception as e:
-        logging.error(f"Error occurred in main(): {str(e)}")
-        logging.error(traceback.format_exc())
+        logging.critical(f"Error occurred in main(): {str(e)}")
+        logging.critical(traceback.format_exc())
     finally:
         update_job_tracking(state)
     
@@ -314,11 +329,11 @@ def main(state=DEFAULT_STATE, driver=None, email=None, password=None, debug_leve
 if __name__ == "__main__":
     try:
         state, driver = main()
-        logging.info('🪦 Program died: outside main function')
+        logging.critical('🪦 Program died: outside main function')
         time.sleep(3600)
     except Exception as e:
-        logging.error('🪦 Error occurred in main:')
-        logging.error(traceback.format_exc())
+        logging.critical('🪦 Error occurred in main:')
+        logging.critical(traceback.format_exc())
         time.sleep(3600)
     finally:
         update_job_tracking(state)
