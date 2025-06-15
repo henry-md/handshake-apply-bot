@@ -16,6 +16,7 @@ from datetime import datetime
 from utils.selenium_helper import Helper
 from utils.query_keywords import query_keywords, bad_keywords, query_search
 from utils.timer import timer
+from utils.logging_formatter import ColoredFormatter
 
 # State variables to fully define session state. Some variables can be changed by user like jobs_per_page.
 DEFAULT_STATE = {
@@ -286,6 +287,15 @@ def main(state=DEFAULT_STATE, driver=None, email=None, password=None, debug_leve
     logging.getLogger("selenium").setLevel(logging.WARNING)
     logging.getLogger("urllib3").setLevel(logging.WARNING)
     logging.getLogger("webdriver_manager").setLevel(logging.WARNING)
+    
+    # Create a colored formatter and apply it to the root logger
+    colored_formatter = ColoredFormatter(
+        fmt='%(asctime)s - %(levelname)s - %(message)s',
+        datefmt='%H:%M'
+    )
+    root_logger = logging.getLogger()
+    for handler in root_logger.handlers:
+        handler.setFormatter(colored_formatter)
 
     # Get helper functions
     helper_logger = logging.getLogger('selenium_helper')
