@@ -14,7 +14,7 @@ from datetime import datetime
 
 # Custom imports
 from utils.selenium_helper import Helper
-from utils.query_keywords import query_keywords, bad_keywords, query_search
+from utils.query_keywords import bad_keywords, good_keywords, query_search
 from utils.timer import timer
 from utils.logging_formatter import ColoredFormatter
 
@@ -177,45 +177,50 @@ def apply_to_jobs_in_left_panel(state, s):
         if idx == 1 or idx == -1:
             continue
             
-        # Skip jobs that don't match any keyword
+        # Filter jobs with good and bad keywords
         try:
             title_element = s.find_element(SELECTORS['job_block_title'], parent=job_list[i])
             title_text = title_element.text
-            if not any(keyword.lower() in title_text.lower() for keyword in query_keywords):
-                logging.info(f"✋ Skipping job with title: {title_text} - doesn't match keywords")
-                continue
+
+            # Check that all levels of good_keywords are satisfied
+            break_flag = False
+            for level_name, good_keyword_level in good_keywords.items():
+                if not any(keyword.lower() in title_text.lower() for keyword in good_keyword_level):
+                    logging.info(f"✋ Skipping job with title: {title_text} - doesn't match requirement for {level_name}")
+                    break_flag = True
+                    break
+            if break_flag: continue
+
+            # Check that no bad keywords are in the title
             if any(keyword.lower() in title_text.lower() for keyword in bad_keywords):
                 continue
-
         except Exception as e:
             logging.error(f"Failed to check job title: {str(e)}")
             continue
 
         # Apply to the specific job in right panel: for every job, click it, and simply click 35px below all the input selections.
-        print('')
+        print()
         logging.info(f'📝 Trying to apply to job w/ title: {title_text}')
-        s.click_web_element(apply_btn)
-        apply_modal = s.find_element_with_wait(SELECTORS['apply_modal_content'], timeout=1) # Seems to use full time no matter what, strange.
-        selection_elements = s.find_all_elements(SELECTORS['selection_elements'], parent=apply_modal)
-        error_clicking_selections_flag = False
-        for selection_input in selection_elements:
-            # Click selection autofill if it's already available
-            selection_fill = s.find_element(SELECTORS['selection_elements_to_fill'], by=By.XPATH)
-            if selection_fill:
-                s.click_web_element(selection_fill)
-                continue
+        try:
+            s.click_web_element(apply_btn)
+            apply_modal = s.find_element_with_wait(SELECTORS['apply_modal_content'], timeout=1) # Seems to use full time no matter what, strange.
+            selection_elements = s.find_all_elements(SELECTORS['selection_elements'], parent=apply_modal)
+            for selection_input in selection_elements:
+                # Click selection autofill if it's already available
+                selection_fill = s.find_element(SELECTORS['selection_elements_to_fill'], by=By.XPATH)
+                if selection_fill:
+                    s.click_web_element(selection_fill)
+                    continue
 
-            # Otherwise, click the search box first to get the autofill option
-            selection_input.click()
-            selection_fill = s.find_element_with_wait(SELECTORS['selection_elements_to_fill'], by=By.XPATH, timeout=3)
-            if not selection_fill:
-                error_clicking_selections_flag = True
-                break
-            s.click_web_element(selection_fill)
-            time.sleep(3)
-        
-        if error_clicking_selections_flag:
-            logging.info('✌️ Ts too complicated twin. Error clicking selections, will skip to next job.')
+                # Otherwise, click the search box first to get the autofill option
+                selection_input.click()
+                selection_fill = s.find_element_with_wait(SELECTORS['selection_elements_to_fill'], by=By.XPATH, timeout=3)
+                if not selection_fill:
+                    raise Exception('🔄 No selection fill found')
+                s.click_web_element(selection_fill)
+                time.sleep(3)
+        except Exception as e:
+            logging.error(f"✌️ Ts too complicated twin. Error clicking selections, will skip to next job. Error: {str(e)}")
             continue
 
         # Click submit on this job app
@@ -241,7 +246,6 @@ def apply_to_jobs_in_left_panel(state, s):
                 # Otherwise it's prob our bad
                 logging.error('🔄 No submit button found or wasn\'t able to click it')
             continue
-        time.sleep(15)
 
     # Only update state if we went through loop without error
     state['num_jobs_to_skip_initially'] = 0
@@ -305,15 +309,18 @@ def main(state=DEFAULT_STATE, driver=None, email=None, password=None, debug_leve
     # Construct full URL with params
     url = "https://jhu.joinhandshake.com/stu/postings"
     params = {
+        "query": query_search,
         "page": "1",
         "per_page": state['jobs_per_page'],
-        "sort_direction": "desc",
-        "sort_column": "default",
-        "query": query_search,
-        "employment_type_names[]": "Full-Time",
-        "job.job_types[]": "9",
+        "employmentTypes": "1", # Full-time
+        "employmentTypes": "2", # Part-time
+        "jobType": "3", # Internship
+        "jobType": "6", # On Campus Student Employment
+        "jobType": "7", # Fellowship
+        "pay%5BsalaryType%5D": "1", # Paid
     }
     full_url = f"{url}?{'&'.join([f'{k}={v}' for k, v in params.items()])}"
+    full_url = "https://jhu.joinhandshake.com/job-search/9566411?jobType=3&jobType=6&jobType=7&pay%5BsalaryType%5D=1&query=software+engineer&per_page=25&page=1"
     
     open_and_login(full_url, driver, s, email, password)
     time.sleep(int(params['per_page']) / 100) # 10 seconds per 1000 jobs
