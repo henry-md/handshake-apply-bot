@@ -30,12 +30,17 @@ DEFAULT_STATE = {
     'num_jobs_to_skip_initially': 0,
     'jobs_per_page': 25,
 }
+DEBUG_STATE = {
+    'pause-after-submit': '10', # seconds
+    'pause-between-selection-fills': 3,
+}
 
 # Handshake-specific selectors — these may need to be updated over time with site updates.
 # If the code suddenly breaks one day, it's likely here.
 SELECTORS = {
     'job_block': "[data-hook*='job-result-card']", # a single job application block in the left column
     'job_block_title': "[id]",
+    'job_block_company': "span", # first span in the block
     'apply_btn': "[aria-label='Apply']",
     'apply_btns_internal_or_external': ["[aria-label='Apply']", "[aria-label='Apply externally']"],
     'submit_btn': "//button[contains(text(), 'Submit Application')]",
@@ -45,6 +50,7 @@ SELECTORS = {
     'apply_modal_content': "[data-enter][data-dialog='true']",
     'selection_elements': "[aria-haspopup='listbox'][role='combobox'][value='']",
     'selection_elements_to_fill': "//div[@role='listbox']/div[@role='option' and @aria-selected='false' and (text()='Supporting Documents' or text()='Transcript' or text()='Cover Letter' or text()='Henry Deutsch Resume')]",
+    'successful_apply_popup': "//div[@role='alert']//div[contains(text(), 'Application Submitted!')]",
 }
 
 @timer
@@ -154,7 +160,6 @@ def apply_to_jobs_in_left_panel(state, s):
     # Apply to rest
     for i in range(remaining_jobs, len(job_list)):
         state['visited_indices'][1] += 1
-            
         click_out_of_modal(s)
 
         # Revive job_list if stale
@@ -181,6 +186,7 @@ def apply_to_jobs_in_left_panel(state, s):
         try:
             title_element = s.find_element(SELECTORS['job_block_title'], parent=job_list[i])
             title_text = title_element.text
+            company_name = s.find_element(SELECTORS['job_block_company'], parent=job_list[i]).text
 
             # Check that all levels of good_keywords are satisfied
             break_flag = False
@@ -200,20 +206,26 @@ def apply_to_jobs_in_left_panel(state, s):
 
         # Apply to the specific job in right panel: for every job, click it, and simply click 35px below all the input selections.
         print()
-        logging.info(f'📝 Trying to apply to job w/ title: {title_text}')
+        logging.info(f'📝 Trying to apply to job w/ title: {title_text} @ {company_name}')
         try:
             s.click_web_element(apply_btn)
             apply_modal = s.find_element_with_wait(SELECTORS['apply_modal_content'], timeout=1) # Seems to use full time no matter what, strange.
             selection_elements = s.find_all_elements(SELECTORS['selection_elements'], parent=apply_modal)
+            # print('👉👉👉👉👉👉👉👉👉  selection_elements text:', [el.get_attribute('placeholder') or '[no placeholder]' for el in selection_elements])
+            print('👉👉👉👉👉👉👉👉👉  stringified selection elements:', s.stringify_elements(selection_elements, relevant_attributes=['placeholder']))
             for selection_input in selection_elements:
                 # Click selection autofill if it's already available
-                selection_fill = s.find_element(SELECTORS['selection_elements_to_fill'], by=By.XPATH)
+                selection_fill_grandparent = selection_input.find_element(By.XPATH, "../..")
+                selection_fill = s.find_element(SELECTORS['selection_elements_to_fill'], by=By.XPATH, parent=selection_fill_grandparent)
                 if selection_fill:
-                    s.click_web_element(selection_fill)
+                    s.click_with_wait(SELECTORS['selection_elements_to_fill'], by=By.XPATH, parent=selection_fill_grandparent)
+                    print('👉👉👉👉👉👉👉👉👉  clicked selection fill', s.stringify_elements([selection_fill]))
                     continue
 
                 # Otherwise, click the search box first to get the autofill option
                 selection_input.click()
+                print('👉👉👉👉👉👉👉👉👉  clicked selection input')
+                time.sleep(int(DEBUG_STATE['pause-between-selection-fills']))
                 selection_fill = s.find_element_with_wait(SELECTORS['selection_elements_to_fill'], by=By.XPATH, timeout=3)
                 if not selection_fill:
                     raise Exception('🔄 No selection fill found')
@@ -233,9 +245,15 @@ def apply_to_jobs_in_left_panel(state, s):
             if submit_btn.get_attribute('disabled'):
                 s.driver.execute_script("arguments[0].removeAttribute('disabled');", submit_btn)
             s.actions.move_to_element(submit_btn).click().perform()
+
+            # Make sure we've applied to the job
+            successful_apply_popup = s.find_element_with_wait(SELECTORS['successful_apply_popup'], by=By.XPATH, timeout=2)
+            if not successful_apply_popup:
+                raise Exception('😢 We hit submit but did not apply')
+
             state['submissions_count'] += 1
             state['last_applied_job_idx'] = state['visited_indices'][1]
-            logging.info(f'🚀 Applied to job: {title_text} ({state["submissions_count"]} so far)')
+            logging.info(f'🚀 Applied to job: {title_text} @ {company_name} ({state["submissions_count"]} so far)')
         except Exception as e:
             logging.error(f"Error clicking submit: {str(e)}")
             # Sometimes Handshake's button stop working (with or without a bot) — that's their problem
@@ -245,6 +263,7 @@ def apply_to_jobs_in_left_panel(state, s):
                 # Otherwise it's prob our bad
                 logging.error('🔄 No submit button found or wasn\'t able to click it')
             continue
+        time.sleep(int(DEBUG_STATE['pause-after-submit']))
 
     # Only update state if we went through loop without error
     state['num_jobs_to_skip_initially'] = 0

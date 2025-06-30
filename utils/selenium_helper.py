@@ -23,30 +23,61 @@ class Helper:
     self.driver = driver
     self.logging = logging
     self.actions = ActionChains(driver)
+  
+  def stringify_elements(self, res: List[WebElement | None] | WebElement | None, relevant_attributes=[]) -> List[str] | str:
+    """
+    Stringifies a list of WebElements.
+    If relevant_attributes is empty, all attributes will be included in the string.
+    If relevant_attributes is provided, only the attributes in the list will be included in the string.
+    Acts robustly in the case that some of the relevant_attributes are not present in the given element.
+    Includes the visible text content between the tags.
+    Ex. <input value="test">test</input>
+    """
+    if res is None:
+      return "None"
+    
+    element_strings = []
+    if isinstance(res, WebElement):
+      res = [res]
+    for element in res:
+      if element is None:
+        element_strings.append("None")
+        continue
+      tag_name = element.tag_name
+      
+      # Get all attributes as a dictionary
+      attrs = self.driver.execute_script("""
+        let attrs = {};
+        let element = arguments[0];
+        for (let i = 0; i < element.attributes.length; i++) {
+          attrs[element.attributes[i].name] = element.attributes[i].value;
+        }
+        return attrs;
+      """, element)
 
-  def readable_web_element(self, element: WebElement | None) -> str:
-    if not element:
-      return 'No element found'
-    
-    # Get tag name and HTML content
-    tag_name = element.tag_name
-    html_content = element.get_attribute("innerHTML")
-    
-    # Get all attributes as a dictionary
-    attrs = self.driver.execute_script("""
-      let attrs = {};
-      let element = arguments[0];
-      for (let i = 0; i < element.attributes.length; i++) {
-        attrs[element.attributes[i].name] = element.attributes[i].value;
-      }
-      return attrs;
-    """, element)
-    
-    # Format attributes as k/v pairs
-    attr_str = ' '.join([f'{name}="{value}"' for name, value in attrs.items()])
-    attr_str = ' ' + attr_str if attr_str else ''  # Add leading space if attributes exist
-    
-    return f'<{tag_name}{attr_str}>{html_content}</{tag_name}>'
+      # For input elements, also get the 'value' property (not always in attributes)
+      if tag_name.lower() == "input" and ("value" not in attrs or (relevant_attributes and "value" in relevant_attributes)):
+        attrs["value"] = element.get_attribute("value") or ""
+      
+      # Filter attributes if relevant_attributes is provided
+      if relevant_attributes:
+        filtered_attrs = {}
+        for k in relevant_attributes:
+          if k in attrs:
+            filtered_attrs[k] = attrs[k]
+        attrs = filtered_attrs
+      
+      # Format attributes as k='v'
+      attr_str = ' '.join([f"{k}='{v}'" for k, v in attrs.items()])
+      attr_str = f" {attr_str}" if attr_str else ""
+      
+      # Get the visible text content
+      text_content = element.text or ""
+      
+      # Compose the HTML string
+      html_str = f"<{tag_name}{attr_str}>{text_content}</{tag_name}>"
+      element_strings.append(html_str)
+    return element_strings if len(element_strings) > 1 else element_strings[0]
 
   def web_element_exists(self, element: WebElement) -> bool:
     try:
@@ -150,7 +181,7 @@ class Helper:
       # """, element)
       self.logging.debug(f'Clicked')
     except:
-      self.logging.error(f'Failed to click: {self.readable_web_element(element)}')
+      self.logging.error(f'Failed to click: {self.stringify_elements(element)}')
 
   def click_with_mouse(self, selector: str, parent=None) -> None:
     try:
@@ -166,7 +197,7 @@ class Helper:
   def click_web_element_with_mouse(self, element) -> None:
     try:
       self.actions.move_to_element(element).click().perform()
-      self.logging.debug(f'Clicked with mouse: {self.readable_web_element(element)}')
+      self.logging.debug(f'Clicked with mouse: {self.stringify_elements(element)}')
     except:
       self.logging.debug(f'Failed to click web element')
 
@@ -223,45 +254,3 @@ class Helper:
     element.send_keys(text)
     self.logging.debug(f'Typed')
 
-  @log_execution_time
-  def stringify_elements(self, res: List[WebElement]) -> List[str]:
-    element_text = []
-    for i, element in enumerate(res):
-      # Handle warning messages
-      if element.tag_name == 'span' and element.get_attribute('class') == 'artdeco-inline-feedback__message':
-        element_text.append(f"REQUIREMENT FOR THE ABOVE^ (element {i + 1}): {element.text}")
-        continue
-      
-      # Handle all other form elements
-      type_str = f" (Type: {element.get_attribute('type')})" if element.tag_name == 'input' else ''
-      curr_element_text = f"Element {i + 1}: HTML Tag: {element.tag_name}{type_str}; "
-      # Check input and selection default value
-      if element.tag_name == 'input' or element.tag_name == 'select':
-        default_value = element.get_attribute('value')
-        curr_element_text += f"Default Value: '{default_value}'; "
-      # Check label and span inner text
-      if element.tag_name == 'label' or element.tag_name == 'span':
-        try:
-          child_span = element.find_element(By.CSS_SELECTOR, "span:not([class*='hidden'])")
-          curr_element_text += f"Inner Text: '{child_span.text}'; "
-        except:
-          curr_element_text += f"Inner Text: '{element.text}'; "
-      # Check selection options
-      if element.tag_name == 'select':
-        options = element.find_elements(By.TAG_NAME, 'option')
-        curr_element_text += f"Options: {[opt.text for opt in options[:30]]}{' & other options...' if len(options) > 30 else ''}; "
-      # Check if span or label is required
-      if element.tag_name == 'span' or element.tag_name == 'label':
-        parent = element.find_element(By.XPATH, './..')
-        after_parent = self.driver.execute_script(
-          "return window.getComputedStyle(arguments[0], '::after').getPropertyValue('content');",
-          parent
-        )
-        after_element = self.driver.execute_script(
-          "return window.getComputedStyle(arguments[0], '::after').getPropertyValue('content');",
-          element
-        )
-        is_required = after_parent.strip('"') == '*' or after_element.strip('"') == '*'
-        if is_required: curr_element_text += f"Required: {is_required}; "
-      element_text.append(curr_element_text)
-    return element_text
