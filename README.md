@@ -8,8 +8,8 @@
 ## Notes:
 - Track how many jobs you've applied to with the bot, and other things at `utils/tracking.json`
 
-## Soon to be features:
-- I'm in the process of making `apply_robust.py` — Handshake is a buggy site. With or without a bot, sometimes you get the "Job Not Found" error for every single job. Sometimes your sesison times out. The file would be able to re-open a new driver and start immediately applying for new jobs from where it left off, reading from the logs of the previous session in job_tracking.json.
+## Future ideas:
+- I've started `apply_robust.py` but it's not currently functional — Handshake is a buggy site. With or without a bot, sometimes you get the "Job Not Found" error for every single job. Sometimes your sesison times out. The file would be able to re-open a new driver and start immediately applying for new jobs from where it left off, reading from the logs of the previous session in job_tracking.json.
 - If apply_robust.py becomes reliable enough, it could be scheduled as a CRON job and become a background process, running 24/7 until you apply to everything! This bot can run in a headless state (i.e. the browser is not needed)
 
 <br>
