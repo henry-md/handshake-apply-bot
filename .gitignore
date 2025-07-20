@@ -4,3 +4,4 @@ __pycache__/
 utils/job_tracking.json
 test/*
 TODO.md
+archive/*

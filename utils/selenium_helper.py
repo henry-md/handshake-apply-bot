@@ -24,7 +24,7 @@ class Helper:
     self.logging = logging
     self.actions = ActionChains(driver)
   
-  def stringify_elements(self, res: List[WebElement | None] | WebElement | None, relevant_attributes=[]) -> List[str] | str:
+  def stringify_elements(self, el_list: List[WebElement | None] | WebElement | None, relevant_attributes=[]) -> List[str]:
     """
     Stringifies a list of WebElements.
     If relevant_attributes is empty, all attributes will be included in the string.
@@ -33,13 +33,13 @@ class Helper:
     Includes the visible text content between the tags.
     Ex. <input value="test">test</input>
     """
-    if res is None:
+    if not el_list:
       return "None"
     
     element_strings = []
-    if isinstance(res, WebElement):
-      res = [res]
-    for element in res:
+    if isinstance(el_list, WebElement):
+      el_list = [el_list]
+    for element in el_list:
       if element is None:
         element_strings.append("None")
         continue
@@ -58,6 +58,9 @@ class Helper:
       # For input elements, also get the 'value' property (not always in attributes)
       if tag_name.lower() == "input" and ("value" not in attrs or (relevant_attributes and "value" in relevant_attributes)):
         attrs["value"] = element.get_attribute("value") or ""
+
+      # Get the visible text content
+      text_content = element.text or ""
       
       # Filter attributes if relevant_attributes is provided
       if relevant_attributes:
@@ -71,13 +74,10 @@ class Helper:
       attr_str = ' '.join([f"{k}='{v}'" for k, v in attrs.items()])
       attr_str = f" {attr_str}" if attr_str else ""
       
-      # Get the visible text content
-      text_content = element.text or ""
-      
       # Compose the HTML string
       html_str = f"<{tag_name}{attr_str}>{text_content}</{tag_name}>"
       element_strings.append(html_str)
-    return element_strings if len(element_strings) > 1 else element_strings[0]
+    return element_strings
 
   def web_element_exists(self, element: WebElement) -> bool:
     try:

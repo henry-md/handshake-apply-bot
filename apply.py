@@ -31,8 +31,8 @@ DEFAULT_STATE = {
     'jobs_per_page': 25,
 }
 DEBUG_STATE = {
-    'pause-after-submit': '10', # seconds
-    'pause-between-selection-fills': 3,
+    'pause-after-submit': 0, # seconds
+    'pause-between-selection-fills': 0, #
 }
 
 # Handshake-specific selectors — these may need to be updated over time with site updates.
@@ -50,7 +50,7 @@ SELECTORS = {
     'apply_modal_content': "[data-enter][data-dialog='true']",
     'selection_elements': "[aria-haspopup='listbox'][role='combobox'][value='']",
     'selection_elements_to_fill': "//div[@role='listbox']/div[@role='option' and @aria-selected='false' and (text()='Supporting Documents' or text()='Transcript' or text()='Cover Letter' or text()='Henry Deutsch Resume')]",
-    'successful_apply_popup': "//div[@role='alert']//div[contains(text(), 'Application Submitted!')]",
+    'successful_apply_popup': "//div[@role='alert']//div[contains(text(), 'Application submitted!')]",
 }
 
 @timer
@@ -185,6 +185,9 @@ def apply_to_jobs_in_left_panel(state, s):
         # Filter jobs with good and bad keywords
         try:
             title_element = s.find_element(SELECTORS['job_block_title'], parent=job_list[i])
+            if not title_element:
+                logging.error(f'🔄 No title element found for job {i}')
+                continue
             title_text = title_element.text
             company_name = s.find_element(SELECTORS['job_block_company'], parent=job_list[i]).text
 
@@ -211,27 +214,24 @@ def apply_to_jobs_in_left_panel(state, s):
             s.click_web_element(apply_btn)
             apply_modal = s.find_element_with_wait(SELECTORS['apply_modal_content'], timeout=1) # Seems to use full time no matter what, strange.
             selection_elements = s.find_all_elements(SELECTORS['selection_elements'], parent=apply_modal)
-            # print('👉👉👉👉👉👉👉👉👉  selection_elements text:', [el.get_attribute('placeholder') or '[no placeholder]' for el in selection_elements])
-            print('👉👉👉👉👉👉👉👉👉  stringified selection elements:', s.stringify_elements(selection_elements, relevant_attributes=['placeholder']))
             for selection_input in selection_elements:
                 # Click selection autofill if it's already available
                 selection_fill_grandparent = selection_input.find_element(By.XPATH, "../..")
                 selection_fill = s.find_element(SELECTORS['selection_elements_to_fill'], by=By.XPATH, parent=selection_fill_grandparent)
                 if selection_fill:
                     s.click_with_wait(SELECTORS['selection_elements_to_fill'], by=By.XPATH, parent=selection_fill_grandparent)
-                    print('👉👉👉👉👉👉👉👉👉  clicked selection fill', s.stringify_elements([selection_fill]))
                     continue
 
                 # Otherwise, click the search box first to get the autofill option
                 selection_input.click()
-                print('👉👉👉👉👉👉👉👉👉  clicked selection input')
                 time.sleep(int(DEBUG_STATE['pause-between-selection-fills']))
                 selection_fill = s.find_element_with_wait(SELECTORS['selection_elements_to_fill'], by=By.XPATH, timeout=3)
                 if not selection_fill:
                     raise Exception('🔄 No selection fill found')
                 s.click_web_element(selection_fill)
         except Exception as e:
-            logging.error(f"✌️ Ts too complicated twin. Error clicking selections, will skip to next job. Error: {str(e)}")
+            logging.error(f"✌️ Ts too complicated. Error clicking selections, will skip to next job. Error: {str(e)}")
+            # logging.error(f'Trace: {traceback.format_exc()}')
             continue
 
         # Click submit on this job app
